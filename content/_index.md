@@ -3,7 +3,7 @@ title: Introduction
 type: docs
 ---
 
-# Example of RTL page
+# Acerbo datus maxime
 
 {{% columns %}}
 ## Astris ipse furtiva
