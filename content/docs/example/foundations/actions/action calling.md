@@ -1,3 +1,9 @@
+---
+title: Action Calling
+weight: 1
+bookToc: false
+---
+
 ## How to call action from LLM
 
 ### OpenAI
