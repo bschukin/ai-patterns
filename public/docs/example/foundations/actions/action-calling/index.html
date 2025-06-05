@@ -1,0 +1,658 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head><script src="/livereload.js?mindelay=10&amp;v=2&amp;port=1313&amp;path=livereload" data-no-instant defer></script>
+  <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="description" content="
+  How to call action from LLM
+  #
+
+
+  
+    
+      
+        OpenAI
+      
+    
+      
+        Langchain
+      
+    
+      
+        Go
+      
+    
+  
+
+  
+  
+    
+      
+# (c) &#34;AI Agents In Action&#34;, 2025 
+
+from openai import OpenAI
+
+
+client = OpenAI(api_key=..., model=&#39;gpt-4&#39;, base_url=&#39;...&#39;)
+
+
+# Example function to query ChatGPT
+def ask_chatgpt(user_message):    
+    response = client.chat.completions.create(
+        model=&#34;gpt-4-1106-preview&#34;,  # gpt-4 turbo or a model of your preference
+        messages=[{&#34;role&#34;: &#34;system&#34;, &#34;content&#34;: &#34;You are a helpful assistant.&#34;},
+                  {&#34;role&#34;: &#34;user&#34;, &#34;content&#34;: user_message}],
+        temperature=0.7,
+        tools=[
+            {
+                &#34;type&#34;: &#34;function&#34;,
+                &#34;function&#34;: {
+                    &#34;name&#34;: &#34;recommend&#34;,
+                    &#34;description&#34;: &#34;Provide a recommendation for any topic.&#34;,
+                    &#34;parameters&#34;: {
+                        &#34;type&#34;: &#34;object&#34;,
+                        &#34;properties&#34;: {
+                            &#34;topic&#34;: {
+                                &#34;type&#34;: &#34;string&#34;,
+                                &#34;description&#34;: &#34;The topic, a user wants a recommnedation for.&#34;,
+                            },
+                            &#34;rating&#34;: {
+                                &#34;type&#34;: &#34;string&#34;,
+                                &#34;description&#34;: &#34;The rating this recommendation was given.&#34;,
+                                &#34;enum&#34;: [&#34;good&#34;, &#34;bad&#34;, &#34;terrible&#34;]
+                                },
+                        },
+                        &#34;required&#34;: [&#34;topic&#34;],
+                    },
+                },
+                }
+            ]
+        )
+    return response.choices[0].message.tool_calls[0].function
+
+
+# Example usage
+user = &#34;Can you please recommend me a time travel movie?&#34;
+response = ask_chatgpt(user)
+print(response)
+
+user = &#34;Can you please recommend me a good time travel movie?&#34;
+response = ask_chatgpt(user)
+print(response)
+
+    
+  
+    
+      def hello():
+    print(&#34;Hello, world!&#34;)
+
+    
+  
+    
+      package main
+import &#34;fmt&#34;
+func main() {
+  fmt.Println(&#34;Hello, world!&#34;)
+}
+
+    
+  
+
+
+
+
+">
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff">
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#343a40">
+<meta name="color-scheme" content="light dark"><meta property="og:url" content="http://localhost:1313/docs/example/foundations/actions/action-calling/">
+  <meta property="og:site_name" content="Hugo Book">
+  <meta property="og:title" content="Action Calling">
+  <meta property="og:description" content="How to call action from LLM # OpenAI Langchain Go # (c) &#34;AI Agents In Action&#34;, 2025 from openai import OpenAI client = OpenAI(api_key=..., model=&#39;gpt-4&#39;, base_url=&#39;...&#39;) # Example function to query ChatGPT def ask_chatgpt(user_message): response = client.chat.completions.create( model=&#34;gpt-4-1106-preview&#34;, # gpt-4 turbo or a model of your preference messages=[{&#34;role&#34;: &#34;system&#34;, &#34;content&#34;: &#34;You are a helpful assistant.&#34;}, {&#34;role&#34;: &#34;user&#34;, &#34;content&#34;: user_message}], temperature=0.7, tools=[ { &#34;type&#34;: &#34;function&#34;, &#34;function&#34;: { &#34;name&#34;: &#34;recommend&#34;, &#34;description&#34;: &#34;Provide a recommendation for any topic.&#34;, &#34;parameters&#34;: { &#34;type&#34;: &#34;object&#34;, &#34;properties&#34;: { &#34;topic&#34;: { &#34;type&#34;: &#34;string&#34;, &#34;description&#34;: &#34;The topic, a user wants a recommnedation for.&#34;, }, &#34;rating&#34;: { &#34;type&#34;: &#34;string&#34;, &#34;description&#34;: &#34;The rating this recommendation was given.&#34;, &#34;enum&#34;: [&#34;good&#34;, &#34;bad&#34;, &#34;terrible&#34;] }, }, &#34;required&#34;: [&#34;topic&#34;], }, }, } ] ) return response.choices[0].message.tool_calls[0].function # Example usage user = &#34;Can you please recommend me a time travel movie?&#34; response = ask_chatgpt(user) print(response) user = &#34;Can you please recommend me a good time travel movie?&#34; response = ask_chatgpt(user) print(response) def hello(): print(&#34;Hello, world!&#34;) package main import &#34;fmt&#34; func main() { fmt.Println(&#34;Hello, world!&#34;) }">
+  <meta property="og:locale" content="en">
+  <meta property="og:type" content="article">
+    <meta property="article:section" content="docs">
+<title>Action Calling | Hugo Book</title>
+<link rel="icon" href="/favicon.png" >
+<link rel="manifest" href="/manifest.json">
+<link rel="canonical" href="http://localhost:1313/docs/example/foundations/actions/action-calling/">
+<link rel="stylesheet" href="/book.min.27c601ff251cc5c9796bb272aace960013cf351d0c28a7e1301487b32d4800ee.css" integrity="sha256-J8YB/yUcxcl5a7Jyqs6WABPPNR0MKKfhMBSHsy1IAO4=" crossorigin="anonymous">
+  <script defer src="/fuse.min.js"></script>
+  <script defer src="/en.search.min.375d9f48674bfc33e5aedc2f10f52c42dec83ec63ecd3f9cfb3467350ccb78a2.js" integrity="sha256-N12fSGdL/DPlrtwvEPUsQt7IPsY&#43;zT&#43;c&#43;zRnNQzLeKI=" crossorigin="anonymous"></script>
+
+  <script defer src="/sw.min.6f6f90fcb8eb1c49ec389838e6b801d0de19430b8e516902f8d75c3c8bd98739.js" integrity="sha256-b2&#43;Q/LjrHEnsOJg45rgB0N4ZQwuOUWkC&#43;NdcPIvZhzk=" crossorigin="anonymous"></script>
+<!--
+Made with Book Theme
+https://github.com/alex-shpak/hugo-book
+-->
+  
+</head>
+<body dir="ltr">
+  <input type="checkbox" class="hidden toggle" id="menu-control" />
+  <input type="checkbox" class="hidden toggle" id="toc-control" />
+  <main class="container flex">
+    <aside class="book-menu">
+      <div class="book-menu-content">
+        
+  <nav>
+<h2 class="book-brand">
+  <a class="flex align-center" href="/"><span>Hugo Book</span>
+  </a>
+</h2>
+
+
+<div class="book-search hidden">
+  <input type="text" id="book-search-input" placeholder="Search" aria-label="Search" maxlength="64" data-hotkeys="s/" />
+  <div class="book-search-spinner hidden"></div>
+  <ul id="book-search-results"></ul>
+</div>
+<script>document.querySelector(".book-search").classList.remove("hidden")</script>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  
+  <ul>
+    
+      
+        <li class="book-section-flat" >
+          
+  
+  
+
+  
+    <a href="/docs/example/" class="">Example Site</a>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/docs/example/table-of-contents/" class="">Table of Contents</a>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/docs/example/table-of-contents/with-toc/" class="">With ToC</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/docs/example/table-of-contents/without-toc/" class="">Without ToC</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-b10db522e2a44c2e99e6bbedc95614b7" class="toggle" checked />
+    <label for="section-b10db522e2a44c2e99e6bbedc95614b7" class="flex">
+      <a role="button" class="flex-auto ">Foundations</a>
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/docs/example/foundations/actions/" class="">Actions</a>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/docs/example/foundations/actions/action-calling/" class="active">Action Calling</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/docs/example/foundations/hello-bros/" class="">Hello Bros</a>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/docs/example/foundations/hello-bros/hellow/" class="">Hellow</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li class="book-section-flat" >
+          
+  
+  
+
+  
+    <span>Shortcodes</span>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/docs/shortcodes/buttons/" class="">Buttons</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/docs/shortcodes/columns/" class="">Columns</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/docs/shortcodes/details/" class="">Details</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/docs/shortcodes/hints/" class="">Hints</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/docs/shortcodes/mermaid/" class="">Mermaid</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/docs/shortcodes/tabs/" class="">Tabs</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/docs/shortcodes/katex/" class="">KaTeX</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+  </ul>
+
+
+
+
+
+
+
+
+
+
+  
+<ul>
+  
+  <li>
+    <a href="/posts/"  >
+        Blog
+      </a>
+  </li>
+  
+  <li>
+    <a href="https://aigents-hub.com"  target="_blank" rel="noopener">
+        ai-agents-hub
+      </a>
+  </li>
+  
+</ul>
+
+
+
+
+
+
+</nav>
+
+
+
+
+  <script>(function(){var e=document.querySelector("aside .book-menu-content");addEventListener("beforeunload",function(){localStorage.setItem("menu.scrollTop",e.scrollTop)}),e.scrollTop=localStorage.getItem("menu.scrollTop")})()</script>
+
+
+ 
+      </div>
+    </aside>
+
+    <div class="book-page">
+      <header class="book-header">
+        
+  <div class="flex align-center justify-between">
+  <label for="menu-control">
+    <img src="/svg/menu.svg" class="book-icon" alt="Menu" />
+  </label>
+
+  <h3>Action Calling</h3>
+
+  <label for="toc-control">
+    
+  </label>
+</div>
+
+
+  
+ 
+      </header>
+
+      
+      
+  <article class="markdown book-article"><h2 id="how-to-call-action-from-llm">
+  How to call action from LLM
+  <a class="anchor" href="#how-to-call-action-from-llm">#</a>
+</h2>
+<div class="code-tabs">
+  <div class="tab-header">
+    
+      <button class="tab-button active" 
+              onclick="openTab(event, 'openai-0')">
+        OpenAI
+      </button>
+    
+      <button class="tab-button " 
+              onclick="openTab(event, 'langchain-1')">
+        Langchain
+      </button>
+    
+      <button class="tab-button " 
+              onclick="openTab(event, 'go-2')">
+        Go
+      </button>
+    
+  </div>
+
+  
+  
+    <div id="openai-0" class="tab-content active">
+      <div class="highlight"><pre tabindex="0" style=";-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-python" data-lang="python"><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span><span style="color:#408080;font-style:italic"># (c) &#34;AI Agents In Action&#34;, 2025 </span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span><span style="color:#008000;font-weight:bold">from</span> <span style="color:#00f;font-weight:bold">openai</span> <span style="color:#008000;font-weight:bold">import</span> OpenAI
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>client <span style="color:#666">=</span> OpenAI(api_key<span style="color:#666">=...</span>, model<span style="color:#666">=</span><span style="color:#ba2121">&#39;gpt-4&#39;</span>, base_url<span style="color:#666">=</span><span style="color:#ba2121">&#39;...&#39;</span>)
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span><span style="color:#408080;font-style:italic"># Example function to query ChatGPT</span>
+</span></span><span style="display:flex;"><span><span style="color:#008000;font-weight:bold">def</span> <span style="color:#00f">ask_chatgpt</span>(user_message):    
+</span></span><span style="display:flex;"><span>    response <span style="color:#666">=</span> client<span style="color:#666">.</span>chat<span style="color:#666">.</span>completions<span style="color:#666">.</span>create(
+</span></span><span style="display:flex;"><span>        model<span style="color:#666">=</span><span style="color:#ba2121">&#34;gpt-4-1106-preview&#34;</span>,  <span style="color:#408080;font-style:italic"># gpt-4 turbo or a model of your preference</span>
+</span></span><span style="display:flex;"><span>        messages<span style="color:#666">=</span>[{<span style="color:#ba2121">&#34;role&#34;</span>: <span style="color:#ba2121">&#34;system&#34;</span>, <span style="color:#ba2121">&#34;content&#34;</span>: <span style="color:#ba2121">&#34;You are a helpful assistant.&#34;</span>},
+</span></span><span style="display:flex;"><span>                  {<span style="color:#ba2121">&#34;role&#34;</span>: <span style="color:#ba2121">&#34;user&#34;</span>, <span style="color:#ba2121">&#34;content&#34;</span>: user_message}],
+</span></span><span style="display:flex;"><span>        temperature<span style="color:#666">=</span><span style="color:#666">0.7</span>,
+</span></span><span style="display:flex;"><span>        tools<span style="color:#666">=</span>[
+</span></span><span style="display:flex;"><span>            {
+</span></span><span style="display:flex;"><span>                <span style="color:#ba2121">&#34;type&#34;</span>: <span style="color:#ba2121">&#34;function&#34;</span>,
+</span></span><span style="display:flex;"><span>                <span style="color:#ba2121">&#34;function&#34;</span>: {
+</span></span><span style="display:flex;"><span>                    <span style="color:#ba2121">&#34;name&#34;</span>: <span style="color:#ba2121">&#34;recommend&#34;</span>,
+</span></span><span style="display:flex;"><span>                    <span style="color:#ba2121">&#34;description&#34;</span>: <span style="color:#ba2121">&#34;Provide a recommendation for any topic.&#34;</span>,
+</span></span><span style="display:flex;"><span>                    <span style="color:#ba2121">&#34;parameters&#34;</span>: {
+</span></span><span style="display:flex;"><span>                        <span style="color:#ba2121">&#34;type&#34;</span>: <span style="color:#ba2121">&#34;object&#34;</span>,
+</span></span><span style="display:flex;"><span>                        <span style="color:#ba2121">&#34;properties&#34;</span>: {
+</span></span><span style="display:flex;"><span>                            <span style="color:#ba2121">&#34;topic&#34;</span>: {
+</span></span><span style="display:flex;"><span>                                <span style="color:#ba2121">&#34;type&#34;</span>: <span style="color:#ba2121">&#34;string&#34;</span>,
+</span></span><span style="display:flex;"><span>                                <span style="color:#ba2121">&#34;description&#34;</span>: <span style="color:#ba2121">&#34;The topic, a user wants a recommnedation for.&#34;</span>,
+</span></span><span style="display:flex;"><span>                            },
+</span></span><span style="display:flex;"><span>                            <span style="color:#ba2121">&#34;rating&#34;</span>: {
+</span></span><span style="display:flex;"><span>                                <span style="color:#ba2121">&#34;type&#34;</span>: <span style="color:#ba2121">&#34;string&#34;</span>,
+</span></span><span style="display:flex;"><span>                                <span style="color:#ba2121">&#34;description&#34;</span>: <span style="color:#ba2121">&#34;The rating this recommendation was given.&#34;</span>,
+</span></span><span style="display:flex;"><span>                                <span style="color:#ba2121">&#34;enum&#34;</span>: [<span style="color:#ba2121">&#34;good&#34;</span>, <span style="color:#ba2121">&#34;bad&#34;</span>, <span style="color:#ba2121">&#34;terrible&#34;</span>]
+</span></span><span style="display:flex;"><span>                                },
+</span></span><span style="display:flex;"><span>                        },
+</span></span><span style="display:flex;"><span>                        <span style="color:#ba2121">&#34;required&#34;</span>: [<span style="color:#ba2121">&#34;topic&#34;</span>],
+</span></span><span style="display:flex;"><span>                    },
+</span></span><span style="display:flex;"><span>                },
+</span></span><span style="display:flex;"><span>                }
+</span></span><span style="display:flex;"><span>            ]
+</span></span><span style="display:flex;"><span>        )
+</span></span><span style="display:flex;"><span>    <span style="color:#008000;font-weight:bold">return</span> response<span style="color:#666">.</span>choices[<span style="color:#666">0</span>]<span style="color:#666">.</span>message<span style="color:#666">.</span>tool_calls[<span style="color:#666">0</span>]<span style="color:#666">.</span>function
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span><span style="color:#408080;font-style:italic"># Example usage</span>
+</span></span><span style="display:flex;"><span>user <span style="color:#666">=</span> <span style="color:#ba2121">&#34;Can you please recommend me a time travel movie?&#34;</span>
+</span></span><span style="display:flex;"><span>response <span style="color:#666">=</span> ask_chatgpt(user)
+</span></span><span style="display:flex;"><span><span style="color:#008000">print</span>(response)
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>user <span style="color:#666">=</span> <span style="color:#ba2121">&#34;Can you please recommend me a good time travel movie?&#34;</span>
+</span></span><span style="display:flex;"><span>response <span style="color:#666">=</span> ask_chatgpt(user)
+</span></span><span style="display:flex;"><span><span style="color:#008000">print</span>(response)
+</span></span></code></pre></div>
+    </div>
+  
+    <div id="langchain-1" class="tab-content ">
+      <div class="highlight"><pre tabindex="0" style=";-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-python" data-lang="python"><span style="display:flex;"><span><span style="color:#008000;font-weight:bold">def</span> <span style="color:#00f">hello</span>():
+</span></span><span style="display:flex;"><span>    <span style="color:#008000">print</span>(<span style="color:#ba2121">&#34;Hello, world!&#34;</span>)
+</span></span></code></pre></div>
+    </div>
+  
+    <div id="go-2" class="tab-content ">
+      <div class="highlight"><pre tabindex="0" style=";-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-go" data-lang="go"><span style="display:flex;"><span><span style="color:#008000;font-weight:bold">package</span> main
+</span></span><span style="display:flex;"><span><span style="color:#008000;font-weight:bold">import</span> <span style="color:#ba2121">&#34;fmt&#34;</span>
+</span></span><span style="display:flex;"><span><span style="color:#008000;font-weight:bold">func</span> <span style="color:#00f">main</span>() {
+</span></span><span style="display:flex;"><span>  fmt.<span style="color:#00f">Println</span>(<span style="color:#ba2121">&#34;Hello, world!&#34;</span>)
+</span></span><span style="display:flex;"><span>}
+</span></span></code></pre></div>
+    </div>
+  
+</div>
+
+<style>
+.code-tabs { margin: 1em 0; border: 1px solid #ddd; border-radius: 4px; }
+.tab-header { background: #f5f5f5; padding: 0.5em; border-bottom: 1px solid #ddd; }
+.tab-button { 
+  background: none; border: none; padding: 0.5em 1em; cursor: pointer; 
+  border-radius: 3px; margin-right: 5px; 
+}
+.tab-button.active { background: #fff; font-weight: bold; }
+.tab-content { display: none; padding: 1em; }
+.tab-content.active { display: block; }
+</style>
+
+<script>
+function openTab(evt, tabName) {
+  const tabContents = document.querySelectorAll('.tab-content');
+  tabContents.forEach(tab => tab.classList.remove('active'));
+
+  const tabButtons = document.querySelectorAll('.tab-button');
+  tabButtons.forEach(btn => btn.classList.remove('active'));
+
+  document.getElementById(tabName).classList.add('active');
+  evt.currentTarget.classList.add('active');
+}
+</script>
+</article>
+ 
+      
+
+      <footer class="book-footer">
+        
+  <div class="flex flex-wrap justify-between">
+
+
+
+
+
+</div>
+
+
+
+  <script>(function(){function e(e){const t=window.getSelection(),n=document.createRange();n.selectNodeContents(e),t.removeAllRanges(),t.addRange(n)}document.querySelectorAll("pre code").forEach(t=>{t.addEventListener("click",function(){if(window.getSelection().toString())return;e(t.parentElement),navigator.clipboard&&navigator.clipboard.writeText(t.parentElement.textContent)})})})()</script>
+
+
+ 
+        
+      </footer>
+
+      
+  
+ 
+
+      <label for="menu-control" class="hidden book-menu-overlay"></label>
+    </div>
+
+    
+  </main>
+
+  
+</body>
+</html>
+
+
+
+
+
+
+
+
+
+
+
+

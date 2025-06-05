@@ -6,8 +6,9 @@ bookToc: false
 
 ## How to call action from LLM
 
-### OpenAI
 
+
+{{< codetabs "OpenAI" "Langchain" "Go" >}}
 ```python
 
 # (c) "AI Agents In Action", 2025 
@@ -15,7 +16,7 @@ bookToc: false
 from openai import OpenAI
 
 
-client = OpenAI(api_key=..., model='gpt-4', base_url='https://bothub.chat/api/v2/openai/v1')
+client = OpenAI(api_key=..., model='gpt-4', base_url='...')
 
 
 # Example function to query ChatGPT
@@ -61,7 +62,18 @@ print(response)
 user = "Can you please recommend me a good time travel movie?"
 response = ask_chatgpt(user)
 print(response)
-
 ```
-
- 
+<!--tab-->
+```python
+def hello():
+    print("Hello, world!")
+```
+<!--tab-->
+```go
+package main
+import "fmt"
+func main() {
+  fmt.Println("Hello, world!")
+}
+```
+{{< /codetabs >}}

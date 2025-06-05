@@ -2,6 +2,8 @@
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"
   xmlns:xhtml="http://www.w3.org/1999/xhtml">
   <url>
+    <loc>http://localhost:1313/docs/example/foundations/actions/action-calling/</loc>
+  </url><url>
     <loc>http://localhost:1313/docs/example/</loc>
   </url><url>
     <loc>http://localhost:1313/docs/example/table-of-contents/with-toc/</loc>
@@ -16,7 +18,7 @@
   </url><url>
     <loc>http://localhost:1313/docs/example/table-of-contents/</loc>
   </url><url>
-    <loc>http://localhost:1313/docs/example/collapsed/</loc>
+    <loc>http://localhost:1313/docs/example/foundations/</loc>
   </url><url>
     <loc>http://localhost:1313/posts/</loc>
     <lastmod>2014-09-28T00:00:00+00:00</lastmod>
@@ -60,9 +62,11 @@
     <loc>http://localhost:1313/tags/themes/</loc>
     <lastmod>2014-04-02T00:00:00+00:00</lastmod>
   </url><url>
-    <loc>http://localhost:1313/docs/example/collapsed/3rd-level/4th-level/</loc>
+    <loc>http://localhost:1313/docs/example/foundations/actions/</loc>
   </url><url>
-    <loc>http://localhost:1313/docs/example/collapsed/3rd-level/</loc>
+    <loc>http://localhost:1313/docs/example/foundations/hello-bros/</loc>
+  </url><url>
+    <loc>http://localhost:1313/docs/example/foundations/hello-bros/hellow/</loc>
   </url><url>
     <loc>http://localhost:1313/docs/example/hidden/</loc>
   </url><url>
