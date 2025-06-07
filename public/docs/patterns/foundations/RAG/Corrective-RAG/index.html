@@ -1,0 +1,842 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head><script src="/livereload.js?mindelay=10&amp;v=2&amp;port=64906&amp;path=livereload" data-no-instant defer></script>
+  <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="description" content="
+  Corrective RAG (C-RAG)
+  #
+
+
+
+Corrective RAG is an improvement on top of conventional RAG that can use LLM as a judge to refine RAG responses.
+
+
+  Algorithm
+  #
+
+
+The query is routed to the system, which is taken over by the vector store.
+The vector store returns the document chunks fetched by the LLM and the LLM responds with a conversational summary referring to the document chunks as context.
+Another LLM (or maybe the same one) fetches the response and tries to determine how much the LLM is hallucinating.
+If the LLM is hallucinating, the LLM tries to regenerate the answer.
+If the LLM is not hallucinating, the LLM tries to determine whether it is on point and resolves the user’s query.
+If the answer does not resolve the user’s query, the system (an LLM) tries to regenerate the query so that the vector store can retrieve more relevant chunks.
+
+
+&#34;&#34;&#34;
+1. Ensure docker is installed and running (https://docs.docker.com/get-docker/)
+2. pip install -qU langchain_postgres
+3. Run the following command to start the postgres container:
+   
+docker run \
+    --name pgvector-container \
+    -e POSTGRES_USER=langchain \
+    -e POSTGRES_PASSWORD=langchain \
+    -e POSTGRES_DB=langchain \
+    -p 6024:5432 \
+    -d pgvector/pgvector:pg16
+4. Use the connection string below for the postgres container
+
+&#34;&#34;&#34;
+
+import os
+from langchain.prompts import ChatPromptTemplate
+from langchain_openai import ChatOpenAI
+from langchain_openai import OpenAIEmbeddings
+from langchain_community.document_loaders import PyPDFLoader
+from langchain_postgres.vectorstores import PGVector
+from pydantic import BaseModel, Field
+from langchain_core.output_parsers import StrOutputParser
+from langchain_core.runnables import RunnableParallel, RunnablePassthrough
+from typing import List
+from typing_extensions import TypedDict
+from langchain.schema import Document
+from langgraph.graph import END, StateGraph, START
+
+os.system(&#34;clear&#34;)
+
+class GraphState(TypedDict):
+    question: str
+    generation: str
+    documents: List[Document]
+
+class GradeHallucinations(BaseModel):
+  binary_score:str = Field(description=&#34;Answer is grounded in the facts, &#39;yes&#39; or &#39;no&#39;&#34;)
+
+class GradeAnswers(BaseModel):
+  binary_score:str = Field(description=&#34;Answer addresses the question, &#39;yes&#39; or &#39;no&#39;&#34;)
+
+loader = PyPDFLoader(&#34;Activation_Functions.pdf&#34;)
+pages = loader.load_and_split()
+
+connection = &#34;postgresql&#43;psycopg://langchain:langchain@localhost:6024/langchain&#34;
+
+key = &#39;eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjYwMjc0OTRlLWI1NTEtNGFjNy1iZTA0LTQ4NDEzMjdlZjZmMiIsImlzRGV2ZWxvcGVyIjp0cnVlLCJpYXQiOjE3NDQ0MzU0ODEsImV4cCI6MjA2MDAxMTQ4MX0.Tx3NvjUYdGBY3UskbrvFZnhfBxzFuDAp3b7Ii_BXGr8&#39;
+model = ChatOpenAI(model=&#34;gpt-3.5-turbo&#34;, base_url=&#39;https://bothub.chat/api/v2/openai/v1&#39;, api_key=key)
+
+vectore_store = PGVector.from_documents(
+    documents=pages, embedding=OpenAIEmbeddings(base_url=&#39;https://bothub.chat/api/v2/openai/v1&#39;, api_key=key), connection=connection)
+
+retriever = vectore_store.as_retriever()
+
+generate_template = &#34;&#34;&#34;Answer the question based only on the
+                    following context:
+                    {context}
+                    Question: {question}
+                    &#34;&#34;&#34;
+
+generation_prompt = ChatPromptTemplate.from_template(generate_template)
+output_parser = StrOutputParser()
+generation_chain = generation_prompt | model | output_parser
+
+#set up a LangChain pipeline to grade hallucinations from an LLM  response
+llm_grader = model.with_structured_output(GradeHallucinations)
+
+system = &#34;&#34;&#34;You are a grader assessing whether an LLM
+        generation is grounded in / supported by a set of retrieved
+        facts. \n
+     Give a binary score &#39;yes&#39; or &#39;no&#39;. &#39;Yes&#39; means that the
+     answer is grounded in / supported by the set of facts.
+     &#34;&#34;&#34;
+
+hall_prompt = ChatPromptTemplate.from_messages([
+    (&#34;system&#34;,system),
+    (&#34;human&#34;,&#34;Set of facts: \n\n {documents} \n\n LLM generation: {generation}&#34;)
+])
+
+hallucination_grader = hall_prompt|llm_grader
+
+llm_grader_ans = model.with_structured_output(GradeAnswers)
+
+system = &#34;&#34;&#34;You are a grader assessing whether an answer
+    addresses / resolves a question \n
+     Give a binary score &#39;yes&#39; or &#39;no&#39;. Yes&#39; means that the
+     answer resolves the question.&#34;&#34;&#34;
+
+answer_prompt = ChatPromptTemplate.from_messages([
+    (&#34;system&#34;,system),
+    (&#34;human&#34;, &#34;User question: \n\n {question} \n\n LLMgeneration: {generation}&#34;)
+])
+
+answer_grader = answer_prompt|llm_grader_ans
+
+#Finally, prepare a prompt and a chain to rewrite the user query.
+
+rewrite_template = &#34;&#34;&#34;You a question re-writer that converts an
+        input question to a better version that is optimized \n
+        for vectorstore retrieval. Look at the input and try to
+        reason about the underlying semantic intent / meaning.&#34;&#34;&#34;
+rewrite_prompt = ChatPromptTemplate.from_template(rewrite_template)
+
+output_parser_rewrite = StrOutputParser()
+sr = RunnableParallel({&#34;question&#34;:RunnablePassthrough()})
+
+rewrite_chain = sr | rewrite_prompt | model | output_parser_rewrite
+
+def retrieve(state):
+  question = state[&#34;question&#34;]
+  documents = retriever.invoke(question)
+  return {&#34;documents&#34;:documents,&#34;question&#34;:question}
+
+def format_docs(docs):
+  return &#34;\n\n&#34;.join(doc.page_content for doc in docs)
+
+def generate(state):
+  question = state[&#34;question&#34;]
+  documents = state[&#34;documents&#34;]
+  generation = generation_chain.invoke({&#34;context&#34;:format_docs(documents),&#34;question&#34;:question})
+  return {&#34;documents&#34;: documents, &#34;question&#34;: question,  &#34;generation&#34;: generation}
+
+def transform_query(state):
+  question = state[&#34;question&#34;]
+  documents = state[&#34;documents&#34;]
+  better_question = rewrite_chain.invoke({&#34;question&#34;:question})
+  return {&#34;documents&#34;: documents, &#34;question&#34;: better_question}
+
+def grade_generation_v_documents_and_question(state):
+    question = state[&#34;question&#34;]
+    documents = state[&#34;documents&#34;]
+    generation = state[&#34;generation&#34;]
+    hg = hallucination_grader.invoke({&#34;documents&#34;:documents,&#34;generation&#34;:generation})
+    if hg.binary_score==&#34;yes&#34;:
+       ag = answer_grader.invoke({&#34;question&#34;:question,&#34;generation&#34;:generation})
+       if ag.binary_score==&#34;yes&#34;:
+        return &#34;useful&#34;
+       else:
+        return &#34;not useful&#34;
+    else:
+     return &#34;not supported&#34;
+
+
+workflow = StateGraph(GraphState)
+workflow.add_node(&#34;retrieve&#34;,retrieve)
+workflow.add_node(&#34;generate&#34;,generate)
+workflow.add_node(&#34;transform_query&#34;,transform_query)
+
+workflow.add_edge(START,&#34;retrieve&#34;)
+workflow.add_edge(&#34;retrieve&#34;,&#34;generate&#34;)
+workflow.add_conditional_edges(&#34;generate&#34;,grade_generation_v_documents_and_question,
+                               {
+                                   &#34;not supported&#34;:&#34;generate&#34;,
+                                   &#34;not useful&#34;:&#34;transform_query&#34;,
+                                   &#34;useful&#34;:END})
+
+app = workflow.compile()
+inputs = {&#34;question&#34;: &#34;What is Activation Function?&#34;}
+for output in app.stream(inputs):
+  print(output)
+">
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff">
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#343a40">
+<meta name="color-scheme" content="light dark"><meta property="og:url" content="http://localhost:64906/docs/patterns/foundations/RAG/Corrective-RAG/">
+  <meta property="og:site_name" content="AI Agents Hub">
+  <meta property="og:title" content="AI Agents Hub">
+  <meta property="og:description" content="Corrective RAG (C-RAG) # Corrective RAG is an improvement on top of conventional RAG that can use LLM as a judge to refine RAG responses.
+Algorithm # The query is routed to the system, which is taken over by the vector store. The vector store returns the document chunks fetched by the LLM and the LLM responds with a conversational summary referring to the document chunks as context. Another LLM (or maybe the same one) fetches the response and tries to determine how much the LLM is hallucinating. If the LLM is hallucinating, the LLM tries to regenerate the answer. If the LLM is not hallucinating, the LLM tries to determine whether it is on point and resolves the user’s query. If the answer does not resolve the user’s query, the system (an LLM) tries to regenerate the query so that the vector store can retrieve more relevant chunks. &#34;&#34;&#34; 1. Ensure docker is installed and running (https://docs.docker.com/get-docker/) 2. pip install -qU langchain_postgres 3. Run the following command to start the postgres container: docker run \ --name pgvector-container \ -e POSTGRES_USER=langchain \ -e POSTGRES_PASSWORD=langchain \ -e POSTGRES_DB=langchain \ -p 6024:5432 \ -d pgvector/pgvector:pg16 4. Use the connection string below for the postgres container &#34;&#34;&#34; import os from langchain.prompts import ChatPromptTemplate from langchain_openai import ChatOpenAI from langchain_openai import OpenAIEmbeddings from langchain_community.document_loaders import PyPDFLoader from langchain_postgres.vectorstores import PGVector from pydantic import BaseModel, Field from langchain_core.output_parsers import StrOutputParser from langchain_core.runnables import RunnableParallel, RunnablePassthrough from typing import List from typing_extensions import TypedDict from langchain.schema import Document from langgraph.graph import END, StateGraph, START os.system(&#34;clear&#34;) class GraphState(TypedDict): question: str generation: str documents: List[Document] class GradeHallucinations(BaseModel): binary_score:str = Field(description=&#34;Answer is grounded in the facts, &#39;yes&#39; or &#39;no&#39;&#34;) class GradeAnswers(BaseModel): binary_score:str = Field(description=&#34;Answer addresses the question, &#39;yes&#39; or &#39;no&#39;&#34;) loader = PyPDFLoader(&#34;Activation_Functions.pdf&#34;) pages = loader.load_and_split() connection = &#34;postgresql&#43;psycopg://langchain:langchain@localhost:6024/langchain&#34; key = &#39;eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjYwMjc0OTRlLWI1NTEtNGFjNy1iZTA0LTQ4NDEzMjdlZjZmMiIsImlzRGV2ZWxvcGVyIjp0cnVlLCJpYXQiOjE3NDQ0MzU0ODEsImV4cCI6MjA2MDAxMTQ4MX0.Tx3NvjUYdGBY3UskbrvFZnhfBxzFuDAp3b7Ii_BXGr8&#39; model = ChatOpenAI(model=&#34;gpt-3.5-turbo&#34;, base_url=&#39;https://bothub.chat/api/v2/openai/v1&#39;, api_key=key) vectore_store = PGVector.from_documents( documents=pages, embedding=OpenAIEmbeddings(base_url=&#39;https://bothub.chat/api/v2/openai/v1&#39;, api_key=key), connection=connection) retriever = vectore_store.as_retriever() generate_template = &#34;&#34;&#34;Answer the question based only on the following context: {context} Question: {question} &#34;&#34;&#34; generation_prompt = ChatPromptTemplate.from_template(generate_template) output_parser = StrOutputParser() generation_chain = generation_prompt | model | output_parser #set up a LangChain pipeline to grade hallucinations from an LLM response llm_grader = model.with_structured_output(GradeHallucinations) system = &#34;&#34;&#34;You are a grader assessing whether an LLM generation is grounded in / supported by a set of retrieved facts. \n Give a binary score &#39;yes&#39; or &#39;no&#39;. &#39;Yes&#39; means that the answer is grounded in / supported by the set of facts. &#34;&#34;&#34; hall_prompt = ChatPromptTemplate.from_messages([ (&#34;system&#34;,system), (&#34;human&#34;,&#34;Set of facts: \n\n {documents} \n\n LLM generation: {generation}&#34;) ]) hallucination_grader = hall_prompt|llm_grader llm_grader_ans = model.with_structured_output(GradeAnswers) system = &#34;&#34;&#34;You are a grader assessing whether an answer addresses / resolves a question \n Give a binary score &#39;yes&#39; or &#39;no&#39;. Yes&#39; means that the answer resolves the question.&#34;&#34;&#34; answer_prompt = ChatPromptTemplate.from_messages([ (&#34;system&#34;,system), (&#34;human&#34;, &#34;User question: \n\n {question} \n\n LLMgeneration: {generation}&#34;) ]) answer_grader = answer_prompt|llm_grader_ans #Finally, prepare a prompt and a chain to rewrite the user query. rewrite_template = &#34;&#34;&#34;You a question re-writer that converts an input question to a better version that is optimized \n for vectorstore retrieval. Look at the input and try to reason about the underlying semantic intent / meaning.&#34;&#34;&#34; rewrite_prompt = ChatPromptTemplate.from_template(rewrite_template) output_parser_rewrite = StrOutputParser() sr = RunnableParallel({&#34;question&#34;:RunnablePassthrough()}) rewrite_chain = sr | rewrite_prompt | model | output_parser_rewrite def retrieve(state): question = state[&#34;question&#34;] documents = retriever.invoke(question) return {&#34;documents&#34;:documents,&#34;question&#34;:question} def format_docs(docs): return &#34;\n\n&#34;.join(doc.page_content for doc in docs) def generate(state): question = state[&#34;question&#34;] documents = state[&#34;documents&#34;] generation = generation_chain.invoke({&#34;context&#34;:format_docs(documents),&#34;question&#34;:question}) return {&#34;documents&#34;: documents, &#34;question&#34;: question, &#34;generation&#34;: generation} def transform_query(state): question = state[&#34;question&#34;] documents = state[&#34;documents&#34;] better_question = rewrite_chain.invoke({&#34;question&#34;:question}) return {&#34;documents&#34;: documents, &#34;question&#34;: better_question} def grade_generation_v_documents_and_question(state): question = state[&#34;question&#34;] documents = state[&#34;documents&#34;] generation = state[&#34;generation&#34;] hg = hallucination_grader.invoke({&#34;documents&#34;:documents,&#34;generation&#34;:generation}) if hg.binary_score==&#34;yes&#34;: ag = answer_grader.invoke({&#34;question&#34;:question,&#34;generation&#34;:generation}) if ag.binary_score==&#34;yes&#34;: return &#34;useful&#34; else: return &#34;not useful&#34; else: return &#34;not supported&#34; workflow = StateGraph(GraphState) workflow.add_node(&#34;retrieve&#34;,retrieve) workflow.add_node(&#34;generate&#34;,generate) workflow.add_node(&#34;transform_query&#34;,transform_query) workflow.add_edge(START,&#34;retrieve&#34;) workflow.add_edge(&#34;retrieve&#34;,&#34;generate&#34;) workflow.add_conditional_edges(&#34;generate&#34;,grade_generation_v_documents_and_question, { &#34;not supported&#34;:&#34;generate&#34;, &#34;not useful&#34;:&#34;transform_query&#34;, &#34;useful&#34;:END}) app = workflow.compile() inputs = {&#34;question&#34;: &#34;What is Activation Function?&#34;} for output in app.stream(inputs): print(output)">
+  <meta property="og:locale" content="en">
+  <meta property="og:type" content="article">
+    <meta property="article:section" content="docs">
+<title>Corrective Rag | AI Agents Hub</title>
+<link rel="icon" href="/favicon.png" >
+<link rel="manifest" href="/manifest.json">
+<link rel="canonical" href="http://localhost:64906/docs/patterns/foundations/RAG/Corrective-RAG/">
+<link rel="stylesheet" href="/book.min.c3fdfb653876272a973b79cfd3fce16df0dfdcc171b202753ba18394d83ce606.css" integrity="sha256-w/37ZTh2JyqXO3nP0/zhbfDf3MFxsgJ1O6GDlNg85gY=" crossorigin="anonymous">
+  <script defer src="/fuse.min.js"></script>
+  <script defer src="/en.search.min.1e434c66e120a1dc5878022d8266c707c0f8bf34f2bbbbfbc184c0398a0277fa.js" integrity="sha256-HkNMZuEgodxYeAItgmbHB8D4vzTyu7v7wYTAOYoCd/o=" crossorigin="anonymous"></script>
+
+  <script defer src="/sw.min.6f6f90fcb8eb1c49ec389838e6b801d0de19430b8e516902f8d75c3c8bd98739.js" integrity="sha256-b2&#43;Q/LjrHEnsOJg45rgB0N4ZQwuOUWkC&#43;NdcPIvZhzk=" crossorigin="anonymous"></script>
+<!--
+Made with Book Theme
+https://github.com/alex-shpak/hugo-book
+-->
+  
+</head>
+<body dir="ltr">
+  <input type="checkbox" class="hidden toggle" id="menu-control" />
+  <input type="checkbox" class="hidden toggle" id="toc-control" />
+  <main class="container flex">
+    <aside class="book-menu">
+      <div class="book-menu-content">
+        
+  <nav>
+<h2 class="book-brand">
+  <a class="flex align-center" href="/"><span>AI Agents Hub</span>
+  </a>
+</h2>
+
+
+<div class="book-search hidden">
+  <input type="text" id="book-search-input" placeholder="Search" aria-label="Search" maxlength="64" data-hotkeys="s/" />
+  <div class="book-search-spinner hidden"></div>
+  <ul id="book-search-results"></ul>
+</div>
+<script>document.querySelector(".book-search").classList.remove("hidden")</script>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  
+  <ul>
+    
+      
+        <li class="book-section-flat" >
+          
+  
+  
+
+  
+    <a href="/docs/patterns/" class="">Patterns</a>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/docs/patterns/table-of-contents/" class="">Table of Contents</a>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/docs/patterns/table-of-contents/with-toc/" class="">With ToC</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/docs/patterns/table-of-contents/without-toc/" class="">Without ToC</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-40e4602935362f7383483bfbf9e9a9ac" class="toggle" checked />
+    <label for="section-40e4602935362f7383483bfbf9e9a9ac" class="flex">
+      <a role="button" class="flex-auto ">Foundations</a>
+    </label>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/docs/patterns/foundations/actions/" class="">Actions</a>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/docs/patterns/foundations/actions/action-calling/" class="">Action Calling</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/docs/patterns/foundations/RAG/" class="">Rag</a>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/docs/patterns/foundations/RAG/Corrective-RAG/" class="active">Corrective Rag</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+      
+        <li class="book-section-flat" >
+          
+  
+  
+
+  
+    <span>Frameworks</span>
+  
+
+          
+  <ul>
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/docs/frameworks/columns/" class="">Columns</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/docs/frameworks/details/" class="">Details</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/docs/frameworks/hints/" class="">Hints</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/docs/frameworks/MLflow/" class="">Mlflow</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/docs/frameworks/Semantic-Kernel/" class="">Semantic Kernel</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/docs/frameworks/tabs/" class="">Tabs</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/docs/frameworks/katex/" class="">KaTeX</a>
+  
+
+        </li>
+      
+    
+  </ul>
+
+        </li>
+      
+    
+  </ul>
+
+
+
+
+
+
+
+
+
+
+  
+<ul>
+  
+  <li>
+    <a href="/posts/"  >
+        Blog
+      </a>
+  </li>
+  
+  <li>
+    <a href="https://aigents-hub.com"  target="_blank" rel="noopener">
+        ai-agents-hub
+      </a>
+  </li>
+  
+</ul>
+
+
+
+
+
+
+</nav>
+
+
+
+
+  <script>(function(){var e=document.querySelector("aside .book-menu-content");addEventListener("beforeunload",function(){localStorage.setItem("menu.scrollTop",e.scrollTop)}),e.scrollTop=localStorage.getItem("menu.scrollTop")})()</script>
+
+
+ 
+      </div>
+    </aside>
+
+    <div class="book-page">
+      <header class="book-header">
+        
+  <div class="flex align-center justify-between">
+  <label for="menu-control">
+    <img src="/svg/menu.svg" class="book-icon" alt="Menu" />
+  </label>
+
+  <h3>Corrective Rag</h3>
+
+  <label for="toc-control">
+    
+    <img src="/svg/toc.svg" class="book-icon" alt="Table of Contents" />
+    
+  </label>
+</div>
+
+
+  
+  <aside class="hidden clearfix">
+    
+  
+<nav id="TableOfContents">
+  <ul>
+    <li><a href="#corrective-rag-c-rag">Corrective RAG (C-RAG)</a>
+      <ul>
+        <li><a href="#algorithm">Algorithm</a></li>
+      </ul>
+    </li>
+  </ul>
+</nav>
+
+
+
+  </aside>
+  
+ 
+      </header>
+
+      
+      
+  <article class="markdown book-article"><h1 id="corrective-rag-c-rag">
+  Corrective RAG (C-RAG)
+  <a class="anchor" href="#corrective-rag-c-rag">#</a>
+</h1>
+<br>
+<blockquote class="book-hint info">
+<p>Corrective RAG is an improvement on top of conventional RAG that can use LLM as a judge to refine RAG responses.</p>
+</blockquote>
+<h2 id="algorithm">
+  Algorithm
+  <a class="anchor" href="#algorithm">#</a>
+</h2>
+<ol>
+<li>The query is routed to the system, which is taken over by the vector store.</li>
+<li>The vector store returns the document chunks fetched by the LLM and the LLM responds with a conversational summary referring to the document chunks as context.</li>
+<li>Another LLM (or maybe the same one) fetches the response and tries to determine how much the LLM is hallucinating.</li>
+<li>If the LLM is hallucinating, the LLM tries to regenerate the answer.</li>
+<li>If the LLM is not hallucinating, the LLM tries to determine whether it is on point and resolves the user’s query.</li>
+<li>If the answer does not resolve the user’s query, the system (an LLM) tries to regenerate <br>the query so that the vector store can retrieve more relevant chunks.</li>
+</ol>
+<div class="highlight"><pre tabindex="0" style=";-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-python" data-lang="python"><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span><span style="color:#ba2121">&#34;&#34;&#34;
+</span></span></span><span style="display:flex;"><span><span style="color:#ba2121">1. Ensure docker is installed and running (https://docs.docker.com/get-docker/)
+</span></span></span><span style="display:flex;"><span><span style="color:#ba2121">2. pip install -qU langchain_postgres
+</span></span></span><span style="display:flex;"><span><span style="color:#ba2121">3. Run the following command to start the postgres container:
+</span></span></span><span style="display:flex;"><span><span style="color:#ba2121">   
+</span></span></span><span style="display:flex;"><span><span style="color:#ba2121">docker run </span><span style="color:#b62;font-weight:bold">\
+</span></span></span><span style="display:flex;"><span><span style="color:#b62;font-weight:bold"></span><span style="color:#ba2121">    --name pgvector-container </span><span style="color:#b62;font-weight:bold">\
+</span></span></span><span style="display:flex;"><span><span style="color:#b62;font-weight:bold"></span><span style="color:#ba2121">    -e POSTGRES_USER=langchain </span><span style="color:#b62;font-weight:bold">\
+</span></span></span><span style="display:flex;"><span><span style="color:#b62;font-weight:bold"></span><span style="color:#ba2121">    -e POSTGRES_PASSWORD=langchain </span><span style="color:#b62;font-weight:bold">\
+</span></span></span><span style="display:flex;"><span><span style="color:#b62;font-weight:bold"></span><span style="color:#ba2121">    -e POSTGRES_DB=langchain </span><span style="color:#b62;font-weight:bold">\
+</span></span></span><span style="display:flex;"><span><span style="color:#b62;font-weight:bold"></span><span style="color:#ba2121">    -p 6024:5432 </span><span style="color:#b62;font-weight:bold">\
+</span></span></span><span style="display:flex;"><span><span style="color:#b62;font-weight:bold"></span><span style="color:#ba2121">    -d pgvector/pgvector:pg16
+</span></span></span><span style="display:flex;"><span><span style="color:#ba2121">4. Use the connection string below for the postgres container
+</span></span></span><span style="display:flex;"><span><span style="color:#ba2121">
+</span></span></span><span style="display:flex;"><span><span style="color:#ba2121">&#34;&#34;&#34;</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span><span style="color:#008000;font-weight:bold">import</span> <span style="color:#00f;font-weight:bold">os</span>
+</span></span><span style="display:flex;"><span><span style="color:#008000;font-weight:bold">from</span> <span style="color:#00f;font-weight:bold">langchain.prompts</span> <span style="color:#008000;font-weight:bold">import</span> ChatPromptTemplate
+</span></span><span style="display:flex;"><span><span style="color:#008000;font-weight:bold">from</span> <span style="color:#00f;font-weight:bold">langchain_openai</span> <span style="color:#008000;font-weight:bold">import</span> ChatOpenAI
+</span></span><span style="display:flex;"><span><span style="color:#008000;font-weight:bold">from</span> <span style="color:#00f;font-weight:bold">langchain_openai</span> <span style="color:#008000;font-weight:bold">import</span> OpenAIEmbeddings
+</span></span><span style="display:flex;"><span><span style="color:#008000;font-weight:bold">from</span> <span style="color:#00f;font-weight:bold">langchain_community.document_loaders</span> <span style="color:#008000;font-weight:bold">import</span> PyPDFLoader
+</span></span><span style="display:flex;"><span><span style="color:#008000;font-weight:bold">from</span> <span style="color:#00f;font-weight:bold">langchain_postgres.vectorstores</span> <span style="color:#008000;font-weight:bold">import</span> PGVector
+</span></span><span style="display:flex;"><span><span style="color:#008000;font-weight:bold">from</span> <span style="color:#00f;font-weight:bold">pydantic</span> <span style="color:#008000;font-weight:bold">import</span> BaseModel, Field
+</span></span><span style="display:flex;"><span><span style="color:#008000;font-weight:bold">from</span> <span style="color:#00f;font-weight:bold">langchain_core.output_parsers</span> <span style="color:#008000;font-weight:bold">import</span> StrOutputParser
+</span></span><span style="display:flex;"><span><span style="color:#008000;font-weight:bold">from</span> <span style="color:#00f;font-weight:bold">langchain_core.runnables</span> <span style="color:#008000;font-weight:bold">import</span> RunnableParallel, RunnablePassthrough
+</span></span><span style="display:flex;"><span><span style="color:#008000;font-weight:bold">from</span> <span style="color:#00f;font-weight:bold">typing</span> <span style="color:#008000;font-weight:bold">import</span> List
+</span></span><span style="display:flex;"><span><span style="color:#008000;font-weight:bold">from</span> <span style="color:#00f;font-weight:bold">typing_extensions</span> <span style="color:#008000;font-weight:bold">import</span> TypedDict
+</span></span><span style="display:flex;"><span><span style="color:#008000;font-weight:bold">from</span> <span style="color:#00f;font-weight:bold">langchain.schema</span> <span style="color:#008000;font-weight:bold">import</span> Document
+</span></span><span style="display:flex;"><span><span style="color:#008000;font-weight:bold">from</span> <span style="color:#00f;font-weight:bold">langgraph.graph</span> <span style="color:#008000;font-weight:bold">import</span> END, StateGraph, START
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>os<span style="color:#666">.</span>system(<span style="color:#ba2121">&#34;clear&#34;</span>)
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span><span style="color:#008000;font-weight:bold">class</span> <span style="color:#00f;font-weight:bold">GraphState</span>(TypedDict):
+</span></span><span style="display:flex;"><span>    question: <span style="color:#008000">str</span>
+</span></span><span style="display:flex;"><span>    generation: <span style="color:#008000">str</span>
+</span></span><span style="display:flex;"><span>    documents: List[Document]
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span><span style="color:#008000;font-weight:bold">class</span> <span style="color:#00f;font-weight:bold">GradeHallucinations</span>(BaseModel):
+</span></span><span style="display:flex;"><span>  binary_score:<span style="color:#008000">str</span> <span style="color:#666">=</span> Field(description<span style="color:#666">=</span><span style="color:#ba2121">&#34;Answer is grounded in the facts, &#39;yes&#39; or &#39;no&#39;&#34;</span>)
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span><span style="color:#008000;font-weight:bold">class</span> <span style="color:#00f;font-weight:bold">GradeAnswers</span>(BaseModel):
+</span></span><span style="display:flex;"><span>  binary_score:<span style="color:#008000">str</span> <span style="color:#666">=</span> Field(description<span style="color:#666">=</span><span style="color:#ba2121">&#34;Answer addresses the question, &#39;yes&#39; or &#39;no&#39;&#34;</span>)
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>loader <span style="color:#666">=</span> PyPDFLoader(<span style="color:#ba2121">&#34;Activation_Functions.pdf&#34;</span>)
+</span></span><span style="display:flex;"><span>pages <span style="color:#666">=</span> loader<span style="color:#666">.</span>load_and_split()
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>connection <span style="color:#666">=</span> <span style="color:#ba2121">&#34;postgresql+psycopg://langchain:langchain@localhost:6024/langchain&#34;</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>key <span style="color:#666">=</span> <span style="color:#ba2121">&#39;eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjYwMjc0OTRlLWI1NTEtNGFjNy1iZTA0LTQ4NDEzMjdlZjZmMiIsImlzRGV2ZWxvcGVyIjp0cnVlLCJpYXQiOjE3NDQ0MzU0ODEsImV4cCI6MjA2MDAxMTQ4MX0.Tx3NvjUYdGBY3UskbrvFZnhfBxzFuDAp3b7Ii_BXGr8&#39;</span>
+</span></span><span style="display:flex;"><span>model <span style="color:#666">=</span> ChatOpenAI(model<span style="color:#666">=</span><span style="color:#ba2121">&#34;gpt-3.5-turbo&#34;</span>, base_url<span style="color:#666">=</span><span style="color:#ba2121">&#39;https://bothub.chat/api/v2/openai/v1&#39;</span>, api_key<span style="color:#666">=</span>key)
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>vectore_store <span style="color:#666">=</span> PGVector<span style="color:#666">.</span>from_documents(
+</span></span><span style="display:flex;"><span>    documents<span style="color:#666">=</span>pages, embedding<span style="color:#666">=</span>OpenAIEmbeddings(base_url<span style="color:#666">=</span><span style="color:#ba2121">&#39;https://bothub.chat/api/v2/openai/v1&#39;</span>, api_key<span style="color:#666">=</span>key), connection<span style="color:#666">=</span>connection)
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>retriever <span style="color:#666">=</span> vectore_store<span style="color:#666">.</span>as_retriever()
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>generate_template <span style="color:#666">=</span> <span style="color:#ba2121">&#34;&#34;&#34;Answer the question based only on the
+</span></span></span><span style="display:flex;"><span><span style="color:#ba2121">                    following context:
+</span></span></span><span style="display:flex;"><span><span style="color:#ba2121">                    </span><span style="color:#b68;font-weight:bold">{context}</span><span style="color:#ba2121">
+</span></span></span><span style="display:flex;"><span><span style="color:#ba2121">                    Question: </span><span style="color:#b68;font-weight:bold">{question}</span><span style="color:#ba2121">
+</span></span></span><span style="display:flex;"><span><span style="color:#ba2121">                    &#34;&#34;&#34;</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>generation_prompt <span style="color:#666">=</span> ChatPromptTemplate<span style="color:#666">.</span>from_template(generate_template)
+</span></span><span style="display:flex;"><span>output_parser <span style="color:#666">=</span> StrOutputParser()
+</span></span><span style="display:flex;"><span>generation_chain <span style="color:#666">=</span> generation_prompt <span style="color:#666">|</span> model <span style="color:#666">|</span> output_parser
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span><span style="color:#408080;font-style:italic">#set up a LangChain pipeline to grade hallucinations from an LLM  response</span>
+</span></span><span style="display:flex;"><span>llm_grader <span style="color:#666">=</span> model<span style="color:#666">.</span>with_structured_output(GradeHallucinations)
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>system <span style="color:#666">=</span> <span style="color:#ba2121">&#34;&#34;&#34;You are a grader assessing whether an LLM
+</span></span></span><span style="display:flex;"><span><span style="color:#ba2121">        generation is grounded in / supported by a set of retrieved
+</span></span></span><span style="display:flex;"><span><span style="color:#ba2121">        facts. </span><span style="color:#b62;font-weight:bold">\n</span><span style="color:#ba2121">
+</span></span></span><span style="display:flex;"><span><span style="color:#ba2121">     Give a binary score &#39;yes&#39; or &#39;no&#39;. &#39;Yes&#39; means that the
+</span></span></span><span style="display:flex;"><span><span style="color:#ba2121">     answer is grounded in / supported by the set of facts.
+</span></span></span><span style="display:flex;"><span><span style="color:#ba2121">     &#34;&#34;&#34;</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>hall_prompt <span style="color:#666">=</span> ChatPromptTemplate<span style="color:#666">.</span>from_messages([
+</span></span><span style="display:flex;"><span>    (<span style="color:#ba2121">&#34;system&#34;</span>,system),
+</span></span><span style="display:flex;"><span>    (<span style="color:#ba2121">&#34;human&#34;</span>,<span style="color:#ba2121">&#34;Set of facts: </span><span style="color:#b62;font-weight:bold">\n\n</span><span style="color:#ba2121"> </span><span style="color:#b68;font-weight:bold">{documents}</span><span style="color:#ba2121"> </span><span style="color:#b62;font-weight:bold">\n\n</span><span style="color:#ba2121"> LLM generation: </span><span style="color:#b68;font-weight:bold">{generation}</span><span style="color:#ba2121">&#34;</span>)
+</span></span><span style="display:flex;"><span>])
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>hallucination_grader <span style="color:#666">=</span> hall_prompt<span style="color:#666">|</span>llm_grader
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>llm_grader_ans <span style="color:#666">=</span> model<span style="color:#666">.</span>with_structured_output(GradeAnswers)
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>system <span style="color:#666">=</span> <span style="color:#ba2121">&#34;&#34;&#34;You are a grader assessing whether an answer
+</span></span></span><span style="display:flex;"><span><span style="color:#ba2121">    addresses / resolves a question </span><span style="color:#b62;font-weight:bold">\n</span><span style="color:#ba2121">
+</span></span></span><span style="display:flex;"><span><span style="color:#ba2121">     Give a binary score &#39;yes&#39; or &#39;no&#39;. Yes&#39; means that the
+</span></span></span><span style="display:flex;"><span><span style="color:#ba2121">     answer resolves the question.&#34;&#34;&#34;</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>answer_prompt <span style="color:#666">=</span> ChatPromptTemplate<span style="color:#666">.</span>from_messages([
+</span></span><span style="display:flex;"><span>    (<span style="color:#ba2121">&#34;system&#34;</span>,system),
+</span></span><span style="display:flex;"><span>    (<span style="color:#ba2121">&#34;human&#34;</span>, <span style="color:#ba2121">&#34;User question: </span><span style="color:#b62;font-weight:bold">\n\n</span><span style="color:#ba2121"> </span><span style="color:#b68;font-weight:bold">{question}</span><span style="color:#ba2121"> </span><span style="color:#b62;font-weight:bold">\n\n</span><span style="color:#ba2121"> LLMgeneration: </span><span style="color:#b68;font-weight:bold">{generation}</span><span style="color:#ba2121">&#34;</span>)
+</span></span><span style="display:flex;"><span>])
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>answer_grader <span style="color:#666">=</span> answer_prompt<span style="color:#666">|</span>llm_grader_ans
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span><span style="color:#408080;font-style:italic">#Finally, prepare a prompt and a chain to rewrite the user query.</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>rewrite_template <span style="color:#666">=</span> <span style="color:#ba2121">&#34;&#34;&#34;You a question re-writer that converts an
+</span></span></span><span style="display:flex;"><span><span style="color:#ba2121">        input question to a better version that is optimized </span><span style="color:#b62;font-weight:bold">\n</span><span style="color:#ba2121">
+</span></span></span><span style="display:flex;"><span><span style="color:#ba2121">        for vectorstore retrieval. Look at the input and try to
+</span></span></span><span style="display:flex;"><span><span style="color:#ba2121">        reason about the underlying semantic intent / meaning.&#34;&#34;&#34;</span>
+</span></span><span style="display:flex;"><span>rewrite_prompt <span style="color:#666">=</span> ChatPromptTemplate<span style="color:#666">.</span>from_template(rewrite_template)
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>output_parser_rewrite <span style="color:#666">=</span> StrOutputParser()
+</span></span><span style="display:flex;"><span>sr <span style="color:#666">=</span> RunnableParallel({<span style="color:#ba2121">&#34;question&#34;</span>:RunnablePassthrough()})
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>rewrite_chain <span style="color:#666">=</span> sr <span style="color:#666">|</span> rewrite_prompt <span style="color:#666">|</span> model <span style="color:#666">|</span> output_parser_rewrite
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span><span style="color:#008000;font-weight:bold">def</span> <span style="color:#00f">retrieve</span>(state):
+</span></span><span style="display:flex;"><span>  question <span style="color:#666">=</span> state[<span style="color:#ba2121">&#34;question&#34;</span>]
+</span></span><span style="display:flex;"><span>  documents <span style="color:#666">=</span> retriever<span style="color:#666">.</span>invoke(question)
+</span></span><span style="display:flex;"><span>  <span style="color:#008000;font-weight:bold">return</span> {<span style="color:#ba2121">&#34;documents&#34;</span>:documents,<span style="color:#ba2121">&#34;question&#34;</span>:question}
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span><span style="color:#008000;font-weight:bold">def</span> <span style="color:#00f">format_docs</span>(docs):
+</span></span><span style="display:flex;"><span>  <span style="color:#008000;font-weight:bold">return</span> <span style="color:#ba2121">&#34;</span><span style="color:#b62;font-weight:bold">\n\n</span><span style="color:#ba2121">&#34;</span><span style="color:#666">.</span>join(doc<span style="color:#666">.</span>page_content <span style="color:#008000;font-weight:bold">for</span> doc <span style="color:#a2f;font-weight:bold">in</span> docs)
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span><span style="color:#008000;font-weight:bold">def</span> <span style="color:#00f">generate</span>(state):
+</span></span><span style="display:flex;"><span>  question <span style="color:#666">=</span> state[<span style="color:#ba2121">&#34;question&#34;</span>]
+</span></span><span style="display:flex;"><span>  documents <span style="color:#666">=</span> state[<span style="color:#ba2121">&#34;documents&#34;</span>]
+</span></span><span style="display:flex;"><span>  generation <span style="color:#666">=</span> generation_chain<span style="color:#666">.</span>invoke({<span style="color:#ba2121">&#34;context&#34;</span>:format_docs(documents),<span style="color:#ba2121">&#34;question&#34;</span>:question})
+</span></span><span style="display:flex;"><span>  <span style="color:#008000;font-weight:bold">return</span> {<span style="color:#ba2121">&#34;documents&#34;</span>: documents, <span style="color:#ba2121">&#34;question&#34;</span>: question,  <span style="color:#ba2121">&#34;generation&#34;</span>: generation}
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span><span style="color:#008000;font-weight:bold">def</span> <span style="color:#00f">transform_query</span>(state):
+</span></span><span style="display:flex;"><span>  question <span style="color:#666">=</span> state[<span style="color:#ba2121">&#34;question&#34;</span>]
+</span></span><span style="display:flex;"><span>  documents <span style="color:#666">=</span> state[<span style="color:#ba2121">&#34;documents&#34;</span>]
+</span></span><span style="display:flex;"><span>  better_question <span style="color:#666">=</span> rewrite_chain<span style="color:#666">.</span>invoke({<span style="color:#ba2121">&#34;question&#34;</span>:question})
+</span></span><span style="display:flex;"><span>  <span style="color:#008000;font-weight:bold">return</span> {<span style="color:#ba2121">&#34;documents&#34;</span>: documents, <span style="color:#ba2121">&#34;question&#34;</span>: better_question}
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span><span style="color:#008000;font-weight:bold">def</span> <span style="color:#00f">grade_generation_v_documents_and_question</span>(state):
+</span></span><span style="display:flex;"><span>    question <span style="color:#666">=</span> state[<span style="color:#ba2121">&#34;question&#34;</span>]
+</span></span><span style="display:flex;"><span>    documents <span style="color:#666">=</span> state[<span style="color:#ba2121">&#34;documents&#34;</span>]
+</span></span><span style="display:flex;"><span>    generation <span style="color:#666">=</span> state[<span style="color:#ba2121">&#34;generation&#34;</span>]
+</span></span><span style="display:flex;"><span>    hg <span style="color:#666">=</span> hallucination_grader<span style="color:#666">.</span>invoke({<span style="color:#ba2121">&#34;documents&#34;</span>:documents,<span style="color:#ba2121">&#34;generation&#34;</span>:generation})
+</span></span><span style="display:flex;"><span>    <span style="color:#008000;font-weight:bold">if</span> hg<span style="color:#666">.</span>binary_score<span style="color:#666">==</span><span style="color:#ba2121">&#34;yes&#34;</span>:
+</span></span><span style="display:flex;"><span>       ag <span style="color:#666">=</span> answer_grader<span style="color:#666">.</span>invoke({<span style="color:#ba2121">&#34;question&#34;</span>:question,<span style="color:#ba2121">&#34;generation&#34;</span>:generation})
+</span></span><span style="display:flex;"><span>       <span style="color:#008000;font-weight:bold">if</span> ag<span style="color:#666">.</span>binary_score<span style="color:#666">==</span><span style="color:#ba2121">&#34;yes&#34;</span>:
+</span></span><span style="display:flex;"><span>        <span style="color:#008000;font-weight:bold">return</span> <span style="color:#ba2121">&#34;useful&#34;</span>
+</span></span><span style="display:flex;"><span>       <span style="color:#008000;font-weight:bold">else</span>:
+</span></span><span style="display:flex;"><span>        <span style="color:#008000;font-weight:bold">return</span> <span style="color:#ba2121">&#34;not useful&#34;</span>
+</span></span><span style="display:flex;"><span>    <span style="color:#008000;font-weight:bold">else</span>:
+</span></span><span style="display:flex;"><span>     <span style="color:#008000;font-weight:bold">return</span> <span style="color:#ba2121">&#34;not supported&#34;</span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>workflow <span style="color:#666">=</span> StateGraph(GraphState)
+</span></span><span style="display:flex;"><span>workflow<span style="color:#666">.</span>add_node(<span style="color:#ba2121">&#34;retrieve&#34;</span>,retrieve)
+</span></span><span style="display:flex;"><span>workflow<span style="color:#666">.</span>add_node(<span style="color:#ba2121">&#34;generate&#34;</span>,generate)
+</span></span><span style="display:flex;"><span>workflow<span style="color:#666">.</span>add_node(<span style="color:#ba2121">&#34;transform_query&#34;</span>,transform_query)
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>workflow<span style="color:#666">.</span>add_edge(START,<span style="color:#ba2121">&#34;retrieve&#34;</span>)
+</span></span><span style="display:flex;"><span>workflow<span style="color:#666">.</span>add_edge(<span style="color:#ba2121">&#34;retrieve&#34;</span>,<span style="color:#ba2121">&#34;generate&#34;</span>)
+</span></span><span style="display:flex;"><span>workflow<span style="color:#666">.</span>add_conditional_edges(<span style="color:#ba2121">&#34;generate&#34;</span>,grade_generation_v_documents_and_question,
+</span></span><span style="display:flex;"><span>                               {
+</span></span><span style="display:flex;"><span>                                   <span style="color:#ba2121">&#34;not supported&#34;</span>:<span style="color:#ba2121">&#34;generate&#34;</span>,
+</span></span><span style="display:flex;"><span>                                   <span style="color:#ba2121">&#34;not useful&#34;</span>:<span style="color:#ba2121">&#34;transform_query&#34;</span>,
+</span></span><span style="display:flex;"><span>                                   <span style="color:#ba2121">&#34;useful&#34;</span>:END})
+</span></span><span style="display:flex;"><span>
+</span></span><span style="display:flex;"><span>app <span style="color:#666">=</span> workflow<span style="color:#666">.</span>compile()
+</span></span><span style="display:flex;"><span>inputs <span style="color:#666">=</span> {<span style="color:#ba2121">&#34;question&#34;</span>: <span style="color:#ba2121">&#34;What is Activation Function?&#34;</span>}
+</span></span><span style="display:flex;"><span><span style="color:#008000;font-weight:bold">for</span> output <span style="color:#a2f;font-weight:bold">in</span> app<span style="color:#666">.</span>stream(inputs):
+</span></span><span style="display:flex;"><span>  <span style="color:#008000">print</span>(output)
+</span></span></code></pre></div></article>
+ 
+      
+
+      <footer class="book-footer">
+        
+  <div class="flex flex-wrap justify-between">
+
+
+
+
+
+</div>
+
+
+
+  <script>(function(){function e(e){const t=window.getSelection(),n=document.createRange();n.selectNodeContents(e),t.removeAllRanges(),t.addRange(n)}document.querySelectorAll("pre code").forEach(t=>{t.addEventListener("click",function(){if(window.getSelection().toString())return;e(t.parentElement),navigator.clipboard&&navigator.clipboard.writeText(t.parentElement.textContent)})})})()</script>
+
+
+ 
+        
+      </footer>
+
+      
+  
+ 
+
+      <label for="menu-control" class="hidden book-menu-overlay"></label>
+    </div>
+
+    
+    <aside class="book-toc">
+      <div class="book-toc-content">
+        
+  
+<nav id="TableOfContents">
+  <ul>
+    <li><a href="#corrective-rag-c-rag">Corrective RAG (C-RAG)</a>
+      <ul>
+        <li><a href="#algorithm">Algorithm</a></li>
+      </ul>
+    </li>
+  </ul>
+</nav>
+
+
+ 
+      </div>
+    </aside>
+    
+  </main>
+
+  
+</body>
+</html>
+
+
+
+
+
+
+
+
+
+
+
+
