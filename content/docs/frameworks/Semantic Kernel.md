@@ -2,16 +2,28 @@
 bookToc: false
 ---
 
-# Buttons
+# Semantic Kernel
 
-Buttons are styled links that can lead to local page or external link.
+{{% hint info %}}
 
-## Example
+Easily build AI agents and integrate the latest AI models into your C#, Python, or Java codebase.
+<br>Framework by Microsoft
 
-```tpl
-{{</* button relref="/" [class="..."] */>}}Get Home{{</* /button */>}}
-{{</* button href="https://github.com/alex-shpak/hugo-book" */>}}Contribute{{</* /button */>}}
-```
+https://learn.microsoft.com/en-us/semantic-kernel/overview/
 
-{{<button relref="/">}}Get Home{{</button>}}
-{{<button href="https://github.com/alex-shpak/hugo-book">}}Contribute{{</button>}}
+
+{{% /hint %}}
+
+
+
+<div style="text-align: justify;">
+
+Semantic Kernel (SK) is another open source project from Microsoft intended to help build AI applications, which we call agents. 
+At its core, the project is best used to define actions, or what the platform calls semantic plugins, which are wrappers for skills and functions.
+</div>
+
+<img src="/images/image-2.png" width="400" height="280" />
+
+
+
+
