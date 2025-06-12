@@ -1,3 +1,7 @@
+---
+title: "Corrective RAG"
+---
+
 # Corrective RAG (C-RAG)
 
 <br>

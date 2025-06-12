@@ -46,6 +46,10 @@ enableGitInfo = false
 [menu]
 # [[menu.before]]
 [[menu.after]]
+  name = ""
+  url = "https://aigents-hub.com"
+  weight = 10
+[[menu.after]]
   name = "ai-agents-hub"
   url = "https://aigents-hub.com"
   weight = 10

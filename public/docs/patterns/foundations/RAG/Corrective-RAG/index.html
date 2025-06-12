@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <html lang="en" dir="ltr">
-<head><script src="/livereload.js?mindelay=10&amp;v=2&amp;port=64906&amp;path=livereload" data-no-instant defer></script>
+<head><script src="/livereload.js?mindelay=10&amp;v=2&amp;port=1313&amp;path=livereload" data-no-instant defer></script>
   <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="description" content="
@@ -189,21 +189,21 @@ for output in app.stream(inputs):
 ">
 <meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff">
 <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#343a40">
-<meta name="color-scheme" content="light dark"><meta property="og:url" content="http://localhost:64906/docs/patterns/foundations/RAG/Corrective-RAG/">
+<meta name="color-scheme" content="light dark"><meta property="og:url" content="http://localhost:1313/docs/patterns/foundations/RAG/Corrective-RAG/">
   <meta property="og:site_name" content="AI Agents Hub">
-  <meta property="og:title" content="AI Agents Hub">
+  <meta property="og:title" content="Corrective RAG">
   <meta property="og:description" content="Corrective RAG (C-RAG) # Corrective RAG is an improvement on top of conventional RAG that can use LLM as a judge to refine RAG responses.
 Algorithm # The query is routed to the system, which is taken over by the vector store. The vector store returns the document chunks fetched by the LLM and the LLM responds with a conversational summary referring to the document chunks as context. Another LLM (or maybe the same one) fetches the response and tries to determine how much the LLM is hallucinating. If the LLM is hallucinating, the LLM tries to regenerate the answer. If the LLM is not hallucinating, the LLM tries to determine whether it is on point and resolves the user’s query. If the answer does not resolve the user’s query, the system (an LLM) tries to regenerate the query so that the vector store can retrieve more relevant chunks. &#34;&#34;&#34; 1. Ensure docker is installed and running (https://docs.docker.com/get-docker/) 2. pip install -qU langchain_postgres 3. Run the following command to start the postgres container: docker run \ --name pgvector-container \ -e POSTGRES_USER=langchain \ -e POSTGRES_PASSWORD=langchain \ -e POSTGRES_DB=langchain \ -p 6024:5432 \ -d pgvector/pgvector:pg16 4. Use the connection string below for the postgres container &#34;&#34;&#34; import os from langchain.prompts import ChatPromptTemplate from langchain_openai import ChatOpenAI from langchain_openai import OpenAIEmbeddings from langchain_community.document_loaders import PyPDFLoader from langchain_postgres.vectorstores import PGVector from pydantic import BaseModel, Field from langchain_core.output_parsers import StrOutputParser from langchain_core.runnables import RunnableParallel, RunnablePassthrough from typing import List from typing_extensions import TypedDict from langchain.schema import Document from langgraph.graph import END, StateGraph, START os.system(&#34;clear&#34;) class GraphState(TypedDict): question: str generation: str documents: List[Document] class GradeHallucinations(BaseModel): binary_score:str = Field(description=&#34;Answer is grounded in the facts, &#39;yes&#39; or &#39;no&#39;&#34;) class GradeAnswers(BaseModel): binary_score:str = Field(description=&#34;Answer addresses the question, &#39;yes&#39; or &#39;no&#39;&#34;) loader = PyPDFLoader(&#34;Activation_Functions.pdf&#34;) pages = loader.load_and_split() connection = &#34;postgresql&#43;psycopg://langchain:langchain@localhost:6024/langchain&#34; key = &#39;eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjYwMjc0OTRlLWI1NTEtNGFjNy1iZTA0LTQ4NDEzMjdlZjZmMiIsImlzRGV2ZWxvcGVyIjp0cnVlLCJpYXQiOjE3NDQ0MzU0ODEsImV4cCI6MjA2MDAxMTQ4MX0.Tx3NvjUYdGBY3UskbrvFZnhfBxzFuDAp3b7Ii_BXGr8&#39; model = ChatOpenAI(model=&#34;gpt-3.5-turbo&#34;, base_url=&#39;https://bothub.chat/api/v2/openai/v1&#39;, api_key=key) vectore_store = PGVector.from_documents( documents=pages, embedding=OpenAIEmbeddings(base_url=&#39;https://bothub.chat/api/v2/openai/v1&#39;, api_key=key), connection=connection) retriever = vectore_store.as_retriever() generate_template = &#34;&#34;&#34;Answer the question based only on the following context: {context} Question: {question} &#34;&#34;&#34; generation_prompt = ChatPromptTemplate.from_template(generate_template) output_parser = StrOutputParser() generation_chain = generation_prompt | model | output_parser #set up a LangChain pipeline to grade hallucinations from an LLM response llm_grader = model.with_structured_output(GradeHallucinations) system = &#34;&#34;&#34;You are a grader assessing whether an LLM generation is grounded in / supported by a set of retrieved facts. \n Give a binary score &#39;yes&#39; or &#39;no&#39;. &#39;Yes&#39; means that the answer is grounded in / supported by the set of facts. &#34;&#34;&#34; hall_prompt = ChatPromptTemplate.from_messages([ (&#34;system&#34;,system), (&#34;human&#34;,&#34;Set of facts: \n\n {documents} \n\n LLM generation: {generation}&#34;) ]) hallucination_grader = hall_prompt|llm_grader llm_grader_ans = model.with_structured_output(GradeAnswers) system = &#34;&#34;&#34;You are a grader assessing whether an answer addresses / resolves a question \n Give a binary score &#39;yes&#39; or &#39;no&#39;. Yes&#39; means that the answer resolves the question.&#34;&#34;&#34; answer_prompt = ChatPromptTemplate.from_messages([ (&#34;system&#34;,system), (&#34;human&#34;, &#34;User question: \n\n {question} \n\n LLMgeneration: {generation}&#34;) ]) answer_grader = answer_prompt|llm_grader_ans #Finally, prepare a prompt and a chain to rewrite the user query. rewrite_template = &#34;&#34;&#34;You a question re-writer that converts an input question to a better version that is optimized \n for vectorstore retrieval. Look at the input and try to reason about the underlying semantic intent / meaning.&#34;&#34;&#34; rewrite_prompt = ChatPromptTemplate.from_template(rewrite_template) output_parser_rewrite = StrOutputParser() sr = RunnableParallel({&#34;question&#34;:RunnablePassthrough()}) rewrite_chain = sr | rewrite_prompt | model | output_parser_rewrite def retrieve(state): question = state[&#34;question&#34;] documents = retriever.invoke(question) return {&#34;documents&#34;:documents,&#34;question&#34;:question} def format_docs(docs): return &#34;\n\n&#34;.join(doc.page_content for doc in docs) def generate(state): question = state[&#34;question&#34;] documents = state[&#34;documents&#34;] generation = generation_chain.invoke({&#34;context&#34;:format_docs(documents),&#34;question&#34;:question}) return {&#34;documents&#34;: documents, &#34;question&#34;: question, &#34;generation&#34;: generation} def transform_query(state): question = state[&#34;question&#34;] documents = state[&#34;documents&#34;] better_question = rewrite_chain.invoke({&#34;question&#34;:question}) return {&#34;documents&#34;: documents, &#34;question&#34;: better_question} def grade_generation_v_documents_and_question(state): question = state[&#34;question&#34;] documents = state[&#34;documents&#34;] generation = state[&#34;generation&#34;] hg = hallucination_grader.invoke({&#34;documents&#34;:documents,&#34;generation&#34;:generation}) if hg.binary_score==&#34;yes&#34;: ag = answer_grader.invoke({&#34;question&#34;:question,&#34;generation&#34;:generation}) if ag.binary_score==&#34;yes&#34;: return &#34;useful&#34; else: return &#34;not useful&#34; else: return &#34;not supported&#34; workflow = StateGraph(GraphState) workflow.add_node(&#34;retrieve&#34;,retrieve) workflow.add_node(&#34;generate&#34;,generate) workflow.add_node(&#34;transform_query&#34;,transform_query) workflow.add_edge(START,&#34;retrieve&#34;) workflow.add_edge(&#34;retrieve&#34;,&#34;generate&#34;) workflow.add_conditional_edges(&#34;generate&#34;,grade_generation_v_documents_and_question, { &#34;not supported&#34;:&#34;generate&#34;, &#34;not useful&#34;:&#34;transform_query&#34;, &#34;useful&#34;:END}) app = workflow.compile() inputs = {&#34;question&#34;: &#34;What is Activation Function?&#34;} for output in app.stream(inputs): print(output)">
   <meta property="og:locale" content="en">
   <meta property="og:type" content="article">
     <meta property="article:section" content="docs">
-<title>Corrective Rag | AI Agents Hub</title>
+<title>Corrective RAG | AI Agents Hub</title>
 <link rel="icon" href="/favicon.png" >
 <link rel="manifest" href="/manifest.json">
-<link rel="canonical" href="http://localhost:64906/docs/patterns/foundations/RAG/Corrective-RAG/">
+<link rel="canonical" href="http://localhost:1313/docs/patterns/foundations/RAG/Corrective-RAG/">
 <link rel="stylesheet" href="/book.min.c3fdfb653876272a973b79cfd3fce16df0dfdcc171b202753ba18394d83ce606.css" integrity="sha256-w/37ZTh2JyqXO3nP0/zhbfDf3MFxsgJ1O6GDlNg85gY=" crossorigin="anonymous">
   <script defer src="/fuse.min.js"></script>
-  <script defer src="/en.search.min.1e434c66e120a1dc5878022d8266c707c0f8bf34f2bbbbfbc184c0398a0277fa.js" integrity="sha256-HkNMZuEgodxYeAItgmbHB8D4vzTyu7v7wYTAOYoCd/o=" crossorigin="anonymous"></script>
+  <script defer src="/en.search.min.d845f93c03c2aeb945bbb54677f20805e58ef2279d5570de5986a14fbf9a9eac.js" integrity="sha256-2EX5PAPCrrlFu7VGd/IIBeWO8iedVXDeWYahT7&#43;anqw=" crossorigin="anonymous"></script>
 
   <script defer src="/sw.min.6f6f90fcb8eb1c49ec389838e6b801d0de19430b8e516902f8d75c3c8bd98739.js" integrity="sha256-b2&#43;Q/LjrHEnsOJg45rgB0N4ZQwuOUWkC&#43;NdcPIvZhzk=" crossorigin="anonymous"></script>
 <!--
@@ -361,7 +361,7 @@ https://github.com/alex-shpak/hugo-book
   
 
   
-    <a href="/docs/patterns/foundations/RAG/" class="">Rag</a>
+    <a href="/docs/patterns/foundations/RAG/" class="">RAG</a>
   
 
           
@@ -374,7 +374,20 @@ https://github.com/alex-shpak/hugo-book
   
 
   
-    <a href="/docs/patterns/foundations/RAG/Corrective-RAG/" class="active">Corrective Rag</a>
+    <a href="/docs/patterns/foundations/RAG/Corrective-RAG/" class="active">Corrective RAG</a>
+  
+
+        </li>
+      
+    
+      
+        <li>
+          
+  
+  
+
+  
+    <a href="/docs/patterns/foundations/RAG/FewShotPromptTemplate/" class="">Few-Shot Prompt Template</a>
   
 
         </li>
@@ -486,6 +499,27 @@ https://github.com/alex-shpak/hugo-book
         </li>
       
     
+  </ul>
+
+        </li>
+      
+    
+      
+        <li class="book-section-flat" >
+          
+  
+  
+
+  
+    <input type="checkbox" id="section-4b99c9a9de429427c173ab38d4b303f0" class="toggle"  />
+    <label for="section-4b99c9a9de429427c173ab38d4b303f0" class="flex">
+      <a role="button" class="flex-auto ">MLOps Frameworks</a>
+    </label>
+  
+
+          
+  <ul>
+    
       
         <li>
           
@@ -493,7 +527,7 @@ https://github.com/alex-shpak/hugo-book
   
 
   
-    <a href="/docs/frameworks/katex/" class="">KaTeX</a>
+    <a href="/docs/ML-ops-frameworks/LangFuse/" class="">LangFuse</a>
   
 
         </li>
@@ -519,8 +553,8 @@ https://github.com/alex-shpak/hugo-book
 <ul>
   
   <li>
-    <a href="/posts/"  >
-        Blog
+    <a href="https://aigents-hub.com"  target="_blank" rel="noopener">
+        
       </a>
   </li>
   
@@ -557,7 +591,7 @@ https://github.com/alex-shpak/hugo-book
     <img src="/svg/menu.svg" class="book-icon" alt="Menu" />
   </label>
 
-  <h3>Corrective Rag</h3>
+  <h3>Corrective RAG</h3>
 
   <label for="toc-control">
     
